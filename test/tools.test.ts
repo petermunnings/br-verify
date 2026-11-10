@@ -6,7 +6,7 @@ import { checkArtifact, initcode } from '../src/cli/initcode.js';
 import { main, pick, type Io } from '../src/cli/main.js';
 import { readPayloadText, serializeTx, type Tx } from '../src/core/payload.js';
 import { checkNonce, CHAIN_1_RPC_NOTE } from '../src/rpc/nonce.js';
-import { arg, decodedRows, parseJsonText, record, verdictText, verify } from '../src/view/report.js';
+import { arg, decodedRows, parseJsonText, record, verdictText, verify, visible } from '../src/view/report.js';
 import { DEPLOYER_1, KNOWN, KNOWN_PAYLOAD, expectedFrom, rng } from './helpers.js';
 
 const fixture = (f: string) => JSON.parse(readFileSync(new URL(`./fixtures/${f}`, import.meta.url), 'utf8')) as Record<string, unknown>;
@@ -26,7 +26,7 @@ describe('adapters', () => {
       maxPriorityFeePerGas: '1000000000',
       call: { signature: 'mint(address,uint256)', args: ['0x2000000000000000000000000000000000000002', '7000000000000000000000'] },
     });
-    expect(r.notes).toEqual({ toName: 'Test Token', ticket: 'BRA-420', keyLabel: 'test-minter' });
+    expect(r.notes).toEqual({ source: 'metaData', toName: 'Test Token', ticket: 'BRA-420', keyLabel: 'test-minter' });
     // The fixture's digest is all zeros: the verdict comes from the payload only.
     const rep = verify(reading(MINT_TX), r.expected, r.notes);
     expect(rep.result.verdict).toBe('PARTIAL');
@@ -49,13 +49,14 @@ describe('adapters', () => {
     const r = fromBundle({ kind: 'create', chainId: 1, from: DEPLOYER_1, to: null, value: 0, data: '0x6080', initCodeHash: keccak256('0x6080'), expectedNonce: 0, expectedAddress: '0x06Fbac10db58E960Aa3D6Ff94554426e6c1AbE50', gasLimit: 11878178, artifact: { creationCodeHash: '0x01' }, constructorArgs: { admin: DEPLOYER_1 } });
     expect(r.expected).toMatchObject({ to: null, nonce: 0, dataHash: keccak256('0x6080'), gas: 11878178 });
     expect(r.notes.artifact).toEqual({ creationCodeHash: '0x01' });
+    expect(r.notes.source).toBe('bundle');
   });
   it('message bundles and unknown kinds are refused', () => {
     expect(() => readExpected(fixture('bundle-message.json'))).toThrow(/EIP-191/);
     expect(() => fromBundle({ kind: 'other' })).toThrow(/unknown bundle kind/);
   });
   it('plain expected JSON with an unknown key is refused', () => {
-    expect(readExpected({ chainId: 1 }).format).toBe('expected');
+    expect(readExpected({ chainId: 1 })).toMatchObject({ format: 'expected', notes: { source: 'expected' } });
     expect(() => readExpected({ chainId: 1, gasLimit: '1' })).toThrow(/unknown field: gasLimit/);
     expect(() => readExpected({ a: 1, b: 2 })).toThrow(/unknown fields: a, b/);
     expect(() => readExpected([])).toThrow(/JSON object/);
@@ -72,7 +73,10 @@ describe('view', () => {
     expect(v('MATCH')).toMatchObject({ tone: 'green', headline: 'MATCH: the payload is the transaction you entered' });
     expect(v('MATCH').detail).toMatch(/keccak256/);
     expect(v('MISMATCH').detail).toBe('nonce: expected 1, payload has 2');
-    expect(v('PARTIAL').detail).toBe('Not compared: gas limit. Check those against the ticket.');
+    expect(v('PARTIAL').headline).toBe('PARTIAL: the fields you entered match');
+    expect(v('PARTIAL').detail).toBe('Compared: chain ID, nonce, max priority fee, max fee, to, value, data, access list.\nNot compared: gas limit. Check those against the ticket.');
+    const onlyList = verdictText({ verdict: 'PARTIAL', reason: '', differences: [], notCompared: ['chainId', 'nonce', 'maxPriorityFeePerGas', 'maxFeePerGas', 'gas', 'to', 'value', 'data'], dataComparedBy: null, createAddress: null });
+    expect(onlyList.headline).toBe('PARTIAL: only the access list was compared');
     expect(v('NOT COMPARED').tone).toBe('grey');
     expect(v('CANNOT VERIFY').detail).toBe('why. Reject unless the ticket explains why.');
     expect(v('BARE HASH').headline).toBe('BARE HASH: reject');
@@ -87,8 +91,8 @@ describe('view', () => {
     const rep = verify(reading(MINT_TX), { call: { signature: 'mint(address to, uint256 amount)', args: [] } }, { toName: 'Test Token' });
     const rows = Object.fromEntries(decodedRows(rep));
     expect(rows.To).toBe('0x1000000000000000000000000000000000000001 (Test Token: name as entered, not verified)');
-    expect(rows.Function).toBe('mint(address,uint256) (0x40c10f19)');
-    expect(rows['  2. amount (uint256)']).toBe('7000000000000000000000');
+    expect(rows.Function).toBe('mint(address,uint256) (selector 0x40c10f19 matches; the name is as entered, not verified)');
+    expect(rows['  2. uint256']).toBe('7000000000000000000000 (amount: name as entered, not verified)');
     expect(rows['Max fee']).toBe('2,000,000,000 wei (2 gwei)');
   });
   it('the decoded view of an undecoded call and of a creation with from', () => {
@@ -107,9 +111,11 @@ describe('view', () => {
     expect(m[0]).toBe('br-verify dev (commit dev), 2026-11-10T08:00:00Z');
     expect(m.slice(1)).toEqual([
       'Verdict: MATCH (data compared as bytes)',
+      'Expected fields from: typed in',
       'Payload: 24 bytes, keccak256 0x3e0439a8c03f175b15faa919d8bd271e056f0427502cbe9b4fbc091dff37ca40',
       `Chain 1 · nonce 0 · contract creation · init-code hash ${keccak256('0x6080')} · 2 bytes`,
       `CREATE address 0x06Fbac10db58E960Aa3D6Ff94554426e6c1AbE50 (from ${DEPLOYER_1}, as entered)`,
+      "signKeyName in DETAILS: br-verify can't see it. Check it is the key the ticket names",
       'Gas limit 11,878,178 · max fee 2,000,000,000 wei · max priority fee 1,000,000,000 wei · value 0 wei',
       'Access list: payload empty; expected empty',
       'Not compared: none',
@@ -123,8 +129,31 @@ describe('view', () => {
     expect(dflt).toMatch(/Access list: payload empty; expected empty \(the form's default\)/);
     const listed: Tx = { ...KNOWN, accessList: [{ address: DEPLOYER_1, storageKeys: [] }] };
     expect(record(verify(reading(listed), { accessList: [{ address: DEPLOYER_1, storageKeys: [] }] }), now)).toMatch(/Access list: payload 1 entries; expected 1 entries/);
-    expect(record(verify({ encoding: 'base64', bytes: new Uint8Array(32) }), now)).toMatch(/Verdict: BARE HASH\nReason: .*\nPayload: 32 bytes, read as base64/);
+    expect(record(verify({ encoding: 'base64', bytes: new Uint8Array(32) }), now)).toMatch(/Verdict: BARE HASH\nExpected fields from: nothing entered\nReason: .*\nPayload: 32 bytes, read as base64/);
     expect(record(verify(reading(KNOWN), { value: 'x' }), now)).toMatch(/Reason: what you entered is not valid/);
+    expect(record(verify(reading(KNOWN)), now)).toMatch(/\nExpected fields from: nothing entered\n/);
+  });
+  it('names from metaData are marked as entered, and the record names the source', () => {
+    // Marelize's review: a requester's metaData can give reassuring names to the arguments of a real call.
+    const r = readExpected({ ...META, function: 'mint(address yourOwnSafe, uint256 readOnlyAmount)' });
+    const rep = verify(reading(MINT_TX), { ...r.expected, accessList: [] }, r.notes);
+    expect(rep.result.verdict).toBe('MATCH');
+    const rows = Object.fromEntries(decodedRows(rep));
+    expect(rows['  1. address']).toBe('0x2000000000000000000000000000000000000002 (yourOwnSafe: name as entered, not verified)');
+    expect(rows.Function).toMatch(/the name is as entered, not verified/);
+    expect(record(rep, new Date())).toMatch(/\nExpected fields from: metaData \(written by the requester's machine\)\n/);
+    const b = readExpected(MINT);
+    expect(record(verify(reading(MINT_TX), b.expected, b.notes), new Date())).toMatch(/Expected fields from: a facility-book bundle/);
+  });
+  it('invisible and direction-changing characters are shown as code points', () => {
+    expect(visible('ab\u202Ecd\u200B\uFEFF\n')).toBe('ab[U+202E]cd[U+200B][U+FEFF][U+000A]');
+    expect(visible('plain · text … ×')).toBe('plain · text … ×');
+    expect(arg('safe\u202Eexe.txt')).toBe('safe[U+202E]exe.txt');
+    expect(arg({ ['k\u2066']: 'v' })).toBe('{k[U+2066]: v}');
+    const rows = Object.fromEntries(decodedRows(verify(reading(MINT_TX), {}, { toName: 'Token\u202E' })));
+    expect(rows.To).toMatch(/\(Token\[U\+202E\]: name as entered/);
+    const v = verdictText({ verdict: 'CANNOT VERIFY', reason: 'bad \u2067x', differences: [], notCompared: [], dataComparedBy: null, createAddress: null });
+    expect(v.detail).toBe('bad [U+2067]x. Reject unless the ticket explains why.');
   });
 });
 
@@ -243,6 +272,15 @@ describe('the CLI', () => {
     expect(r.err).toMatch(/read as metaData\. Its digest is ignored/);
     expect(r.out).toMatch(/PARTIAL/);
   });
+  it('--from must agree with "from" in the expected fields (Marelize\'s review)', async () => {
+    const other = '0x4000000000000000000000000000000000000004';
+    const r = await run(['compare', '--payload', 'mint.txt', '--expected', 'meta.json', '--from', other]);
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/CANNOT VERIFY: --from 0x4000\S+ differs from "from" in the expected fields \(0x3000\S+\)\. br-verify won't choose between them/);
+    const same = await run(['compare', '--payload', 'mint.txt', '--expected', 'meta.json', '--from', String(META.from), '--json']);
+    expect(JSON.parse(same.out).verdict).toBe('PARTIAL');
+    expect((await run(['compare', '--payload', 'known.txt', '--expected', '{"nonce": 0}', '--from', other, '--record'])).out).toMatch(/Verdict: PARTIAL/);
+  });
   it('the nonce check is opt-in and separate', async () => {
     const fetch = vi.fn(async (_u: string, init: RequestInit) => ({ ok: true, status: 200, json: async () => ({ result: JSON.parse(init.body as string).method === 'eth_chainId' ? '0x1' : '0x0' }) }));
     const r = await run(['decode', 'known.txt', '--rpc', 'http://127.0.0.1:8545', '--from', DEPLOYER_1], { fetch: fetch as never });
@@ -285,6 +323,11 @@ describe('the CLI', () => {
     expect(r.out).toMatch(/admin \(address\) +0x2954/);
     const rec = await run(['initcode', '--bundle', 'bundle.json', '--artifact', 'artifact.json', '--record']);
     expect(rec.out).toMatch(/Artifact artifact.json: creation code 2 bytes/);
+    // --from and --nonce must agree with the bundle; br-verify won't choose between them.
+    const other = '0x4000000000000000000000000000000000000004';
+    expect((await run(['initcode', '--bundle', 'bundle.json', '--from', other])).err).toMatch(/--from 0x4000\S+ differs from the bundle's "from"/);
+    expect((await run(['initcode', '--bundle', 'bundle.json', '--nonce', '1'])).err).toMatch(/--nonce 1 differs from the bundle's "expectedNonce" \(0\)/);
+    expect((await run(['initcode', '--bundle', 'bundle.json', '--from', DEPLOYER_1.toLowerCase(), '--nonce', '0', '--expect-hash', keccak256(data)])).code).toBe(0);
     files['call.json'] = JSON.stringify(MINT);
     expect((await run(['initcode', '--bundle', 'call.json'])).err).toMatch(/contract-creation bundle/);
     files['nonce-less.json'] = JSON.stringify({ kind: 'create', keyPolicyRule: 'x', to: null, data: '0x6080' });

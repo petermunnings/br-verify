@@ -3,7 +3,7 @@
 import type { Expected } from '../core/compare.js';
 
 export type Format = 'expected' | 'metaData' | 'bundle';
-export interface Notes { accessListDefault?: boolean; toName?: string; ticket?: string; keyLabel?: string; artifact?: BundleArtifact; constructorArgs?: unknown }
+export interface Notes { source?: Format; accessListDefault?: boolean; toName?: string; ticket?: string; keyLabel?: string; artifact?: BundleArtifact; constructorArgs?: unknown }
 export interface BundleArtifact { contract?: string; path?: string; creationCodeHash?: string; repoCommit?: string }
 export interface Read { format: Format; expected: Expected; notes: Notes }
 
@@ -28,7 +28,7 @@ export function fromMetaData(m: Obj): Read {
       ...(fn === 'none (value transfer)' ? { data: '0x' }
         : { call: { signature: fn, args: ((m.args ?? []) as { value: unknown }[]).map((a) => a.value) } }),
     }),
-    notes: defined({ toName: target?.name, ticket: m.ticket as string, keyLabel: m.keyLabel as string }),
+    notes: defined({ source: 'metaData' as const, toName: target?.name, ticket: m.ticket as string, keyLabel: m.keyLabel as string }),
   };
 }
 
@@ -44,7 +44,7 @@ export function fromBundle(b: Obj): Read {
       nonce: b.expectedNonce as number | undefined, expectedAddress: b.expectedAddress as string | undefined,
       gas: b.gasLimit as string | undefined,
     }),
-    notes: defined({ artifact: b.artifact as BundleArtifact | undefined, constructorArgs: b.constructorArgs }),
+    notes: defined({ source: 'bundle' as const, artifact: b.artifact as BundleArtifact | undefined, constructorArgs: b.constructorArgs }),
   };
 }
 
@@ -56,5 +56,5 @@ export function readExpected(o: unknown): Read {
   if (['create', 'call', 'message'].includes(obj.kind as string) && ('keyPolicyRule' in obj || 'initCodeHash' in obj || 'payloadBytes' in obj)) return fromBundle(obj);
   const unknown = Object.keys(obj).filter((k) => !EXPECTED_KEYS.includes(k));
   if (unknown.length > 0) throw new Error(`unknown field${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);
-  return { format: 'expected', expected: obj as Expected, notes: {} };
+  return { format: 'expected', expected: obj as Expected, notes: { source: 'expected' } };
 }

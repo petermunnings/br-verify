@@ -53,7 +53,7 @@ describe('dist/br-verify.html', () => {
     box.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     expect(doc.getElementById('count')!.textContent).toBe('24 bytes (read as hex)');
     return new Promise<void>((done, fail) => dom.window.setTimeout(() => { try {
-      expect(doc.querySelector('#verdict .headline')!.textContent).toBe('PARTIAL: the fields you entered match');
+      expect(doc.querySelector('#verdict .headline')!.textContent).toBe('PARTIAL: only the access list was compared');
       expect(doc.getElementById('decoded')!.textContent).toContain('0x3e0439a8c03f175b15faa919d8bd271e056f0427502cbe9b4fbc091dff37ca40');
       expect(doc.getElementById('commit')!.textContent).not.toBe('');
       dom.window.close();

@@ -2,7 +2,7 @@
 // Shared by the web page and the CLI. Presentation only: every decision is made in src/core.
 import { formatEther, formatGwei, isHex, keccak256, type Hex } from 'viem';
 import type { Notes } from '../adapters/index.js';
-import { compare, type Expected, type Result, type Verdict } from '../core/compare.js';
+import { compare, TX_FIELDS, type Expected, type Result, type Verdict } from '../core/compare.js';
 import { decode, type Decoded } from '../core/decode.js';
 import { parsePayload, type Parsed, type Reading, type Tx } from '../core/payload.js';
 
@@ -13,6 +13,19 @@ export const COMMIT = typeof __BR_COMMIT__ === 'string' ? __BR_COMMIT__ : 'dev';
 
 export const FROM_NOTE = 'as entered, not part of the payload: check that the key named in DETAILS (signKeyName) has this address';
 export const FOOTER = 'br-verify checks that the payload matches what you entered. It does not judge whether the transaction is a good idea. If anything differs from the Linear ticket, reject.';
+
+/**
+ * Shows control, zero-width and direction-changing characters as [U+XXXX], so text from a payload,
+ * the requester or an RPC can't look like something else.
+ */
+export const visible = (s: string) => s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => `[U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}]`);
+
+/** Where the expected fields came from, for the record. */
+export const SOURCES = {
+  metaData: "metaData (written by the requester's machine)",
+  bundle: "a facility-book bundle (written by the requester's tooling)",
+  expected: 'expected-fields JSON',
+} as const;
 
 export interface Report { reading: Reading; parsed: Parsed; decoded: Decoded | null; result: Result; expected: Expected; notes: Notes }
 
@@ -30,13 +43,16 @@ export const label = (f: string) => LABELS[f] ?? f;
 
 export type Tone = 'green' | 'red' | 'amber' | 'grey';
 export function verdictText(r: Result): { tone: Tone; headline: string; detail: string } {
+  const compared = TX_FIELDS.filter((f) => !r.notCompared.includes(f));
+  const onlyList = compared.length === 1 && compared[0] === 'accessList';
   const how = r.dataComparedBy === 'keccak256' ? 'data compared by keccak256 (init-code hash)' : 'data compared as bytes';
   const table: Record<Verdict, [Tone, string, string]> = {
     'MATCH': ['green', 'MATCH: the payload is the transaction you entered', `Every transaction field was compared; ${how}.`],
-    'MISMATCH': ['red', 'MISMATCH: reject the request', r.differences.map((d) => `${label(d.field)}: expected ${d.expected}, payload has ${d.actual}`).join('\n')],
-    'PARTIAL': ['amber', 'PARTIAL: the fields you entered match', `Not compared: ${r.notCompared.map(label).join(', ')}. Check those against the ticket.`],
+    'MISMATCH': ['red', 'MISMATCH: reject the request', r.differences.map((d) => visible(`${label(d.field)}: expected ${d.expected}, payload has ${d.actual}`)).join('\n')],
+    'PARTIAL': ['amber', onlyList ? 'PARTIAL: only the access list was compared' : 'PARTIAL: the fields you entered match',
+      `Compared: ${compared.map(label).join(', ')}.\nNot compared: ${r.notCompared.map(label).join(', ')}. Check those against the ticket.`],
     'NOT COMPARED': ['grey', 'NOT COMPARED: decoded only', 'Nothing was compared. Check every field against the Linear ticket.'],
-    'CANNOT VERIFY': ['red', "CANNOT VERIFY: br-verify can't verify this payload", `${r.reason}. Reject unless the ticket explains why.`],
+    'CANNOT VERIFY': ['red', "CANNOT VERIFY: br-verify can't verify this payload", `${visible(r.reason)}. Reject unless the ticket explains why.`],
     'BARE HASH': ['red', 'BARE HASH: reject', 'This is a bare hash. Reject (key policy).'],
   };
   const [tone, headline, detail] = table[r.verdict];
@@ -52,9 +68,9 @@ export const preview = (h: Hex) => (size(h) <= 32 ? h : `${h.slice(0, 34)}…${h
 /** An argument for display: integers in full decimal, long bytes as length and keccak256. */
 export function arg(v: unknown): string {
   if (typeof v === 'bigint' || typeof v === 'number' || typeof v === 'boolean') return String(v);
-  if (typeof v === 'string') return isHex(v) && size(v as Hex) > 64 ? `${grp(size(v as Hex))} bytes, keccak256 ${keccak256(v as Hex)}` : JSON.stringify(v).slice(1, -1) === v ? v : JSON.stringify(v);
+  if (typeof v === 'string') return isHex(v) && size(v as Hex) > 64 ? `${grp(size(v as Hex))} bytes, keccak256 ${keccak256(v as Hex)}` : visible(JSON.stringify(v).slice(1, -1) === v ? v : JSON.stringify(v));
   if (Array.isArray(v)) return `[${v.map(arg).join(', ')}]`;
-  if (v && typeof v === 'object') return `{${Object.entries(v).map(([k, x]) => `${k}: ${arg(x)}`).join(', ')}}`;
+  if (v && typeof v === 'object') return `{${Object.entries(v).map(([k, x]) => `${visible(k)}: ${arg(x)}`).join(', ')}}`;
   return String(v);
 }
 
@@ -68,14 +84,16 @@ export function decodedRows(rep: Report): Row[] {
   const rows: Row[] = [
     ['Chain', tx.chainId === 1 ? d.chain.name : `${tx.chainId}: ${d.chain.name}`],
     ['Kind', d.kind],
-    ['To', tx.to === null ? 'none (contract creation)' : rep.notes.toName ? `${tx.to} (${rep.notes.toName}: name as entered, not verified)` : tx.to],
+    ['To', tx.to === null ? 'none (contract creation)' : rep.notes.toName ? `${tx.to} (${visible(rep.notes.toName)}: name as entered, not verified)` : tx.to],
   ];
   if (d.kind === 'contract creation') {
     rows.push(['Init code', `${grp(d.dataBytes)} bytes`], ['Init-code hash', d.dataHash]);
     if (rep.result.createAddress) rows.push(['CREATE address', `${rep.result.createAddress} (from ${rep.expected.from}, ${FROM_NOTE})`]);
   } else if (d.call?.decoded) {
-    rows.push(['Function', `${d.call.signature} (${d.call.selector})`]);
-    d.call.args.forEach((a, i) => rows.push([`  ${i + 1}. ${a.name || 'argument'} (${a.type})`, arg(a.value)]));
+    // The selector is checked against the payload. The function and argument names are only what was entered,
+    // and when the form was filled from metaData, the requester wrote them.
+    rows.push(['Function', `${d.call.signature} (selector ${d.call.selector} matches; the name is as entered, not verified)`]);
+    d.call.args.forEach((a, i) => rows.push([`  ${i + 1}. ${a.type}`, `${arg(a.value)}${a.name ? ` (${a.name}: name as entered, not verified)` : ''}`]));
   } else if (d.call) {
     rows.push(['Function', `${d.call.selector}: ${d.call.note}`]);
   }
@@ -89,7 +107,7 @@ export function decodedRows(rep: Report): Row[] {
     ['Payload', `${grp(d.payloadBytes)} bytes, read as ${rep.reading.encoding}`],
     ['Digest the HSM signs', `keccak256(payload) ${d.payloadHash}`],
   );
-  return rows;
+  return rows.map(([k, v]): Row => [visible(k), visible(v)]);
 }
 
 /** The short text block an approver pastes into the Linear ticket. */
@@ -97,7 +115,9 @@ export function record(rep: Report, now: Date): string {
   const r = rep.result;
   const how = r.verdict === 'MATCH' ? ` (data compared ${r.dataComparedBy === 'keccak256' ? 'by keccak256' : 'as bytes'})` : '';
   const lines = [`br-verify ${VERSION} (commit ${COMMIT}), ${now.toISOString().replace(/\.\d+Z$/, 'Z')}`, `Verdict: ${r.verdict}${how}`];
-  if (!rep.parsed.ok || !rep.decoded) return [...lines, `Reason: ${r.reason}`, `Payload: ${grp(rep.reading.bytes.length)} bytes, read as ${rep.reading.encoding}`].join('\n');
+  const entered = Object.keys(rep.expected).length > 0;
+  lines.push(`Expected fields from: ${rep.notes.source ? SOURCES[rep.notes.source] : entered ? 'typed in' : 'nothing entered'}`);
+  if (!rep.parsed.ok || !rep.decoded) return [...lines, `Reason: ${r.reason}`, `Payload: ${grp(rep.reading.bytes.length)} bytes, read as ${rep.reading.encoding}`].map(visible).join('\n');
   const tx = rep.parsed.tx;
   const d = rep.decoded;
   lines.push(`Payload: ${grp(d.payloadBytes)} bytes, keccak256 ${d.payloadHash}`);
@@ -105,6 +125,7 @@ export function record(rep: Report, now: Date): string {
     : `${d.kind} to ${tx.to} · ${d.call?.decoded ? d.call.signature : `selector ${d.call?.selector ?? 'none'}`} · data keccak256 ${d.dataHash} · ${grp(d.dataBytes)} bytes`;
   lines.push(`Chain ${tx.chainId} · nonce ${tx.nonce} · ${what}`);
   if (r.createAddress) lines.push(`CREATE address ${r.createAddress} (from ${rep.expected.from}, as entered)`);
+  lines.push("signKeyName in DETAILS: br-verify can't see it. Check it is the key the ticket names");
   lines.push(`Gas limit ${grp(tx.gas)} · max fee ${grp(tx.maxFeePerGas)} wei · max priority fee ${grp(tx.maxPriorityFeePerGas)} wei · value ${grp(tx.value)} wei`);
   const want = rep.expected.accessList;
   const wanted = want === undefined ? 'not entered' : want.length > 0 ? `${want.length} entries` : rep.notes.accessListDefault ? "empty (the form's default)" : 'empty';
@@ -113,7 +134,7 @@ export function record(rep: Report, now: Date): string {
   if (r.verdict === 'CANNOT VERIFY') lines.push(`Reason: ${r.reason}`);
   lines.push(`Not compared: ${r.notCompared.length ? r.notCompared.map(label).join(', ') : 'none'}`);
   for (const w of d.warnings) lines.push(`Warning: ${w}`);
-  return lines.join('\n');
+  return lines.map(visible).join('\n');
 }
 
 /** JSON text, or base64 of JSON text (how the Authorization App shows `metaData`). */

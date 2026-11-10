@@ -4,6 +4,23 @@ This is for the reviewer, **Marelize Kriel**. The key policy requires someone ot
 
 What br-verify must do is in `README.md`. In short: take the payload from the Authorization App's DETAILS tab, check that it is a canonical unsigned EIP-1559 transaction, compare it with the fields the approver entered, and show one verdict. MATCH appears only after a full comparison.
 
+## 0. Changes since your review (0.1.1)
+
+You approved 0.1.0 (commit `9e9b4586bfe6`) for the demo and the SBX with test keys only. Version 0.1.1 answers your comments. `src/core/` is unchanged, so section 1 still holds. Please review the diff `9e9b4586bfe6..` against this list.
+
+| Your comment | The change |
+|---|---|
+| `report.ts:78`: argument names come from the supplied signature, which is the requester's when the form is filled from `metaData` | The decoded view shows each argument by type, with its name marked "name as entered, not verified". The function row says "selector … matches; the name is as entered, not verified". `Notes` has a `source`, and the record says "Expected fields from: metaData (written by the requester's machine)", "a facility-book bundle", "expected-fields JSON", "typed in" or "nothing entered". |
+| `cli/main.ts:93`: a `from` in the expected JSON silently wins over `--from` | When both are given and they differ, the CLI refuses with CANNOT VERIFY (exit 2). `initcode --bundle` now does the same for `--from` against the bundle's `from`, and for `--nonce` against its `expectedNonce`. It never chooses between them. |
+| `REVIEW.md:35` contradicts itself on real key addresses | Reworded below. |
+| Nit `report.ts:37`: "PARTIAL: the fields you entered match" when nothing was typed | When only the default access list was compared, the headline is "PARTIAL: only the access list was compared". Every PARTIAL now lists what was compared as well as what wasn't. |
+| Nit `report.ts:55`: bidi and zero-width characters shown raw | Control, format (`Cf`: bidi, zero-width, BOM) and line-separator characters are shown as `[U+XXXX]`. This covers the decoded view, the verdict text, the record, string arguments, `toName`, the page's JSON and nonce messages, and the CLI's errors and nonce result. |
+| Nit `build.mjs:49`: CLI target `node20` | Now `node24`. |
+| Nit `report.ts:96`: no `signKeyName` line in the record | The record has "signKeyName in DETAILS: br-verify can't see it. Check it is the key the ticket names". |
+| Nit `.npmrc:4`: `audit=false`, no `engine-strict` | `audit=false` is removed, and `engine-strict=true` is set. |
+
+Not changed, as you said no action was needed: non-ASCII in the inline script (`build.mjs:23`), `connect-src https:` (`build.mjs:36`, needed for an RPC URL the approver types), ungrouped integer arguments (`report.ts:54`) and the 295 core lines. Your registry idea and the question of moving the repo to the Braided Rivers organisation are for Peter and BRA-695.
+
 ## 1. Read the core
 
 `src/core/` holds every decision. It imports only `viem` and its own files (a test enforces this). It has no DOM, no Node APIs and no network.
@@ -19,11 +36,11 @@ The rest only presents or reads:
 
 | File | Lines | What it does |
 |---|---|---|
-| `src/view/report.ts` | 125 | The verdict wording, the decoded view, the result record. Shared by the page and the CLI. |
+| `src/view/report.ts` | 146 | The verdict wording, the decoded view, the result record. Shared by the page and the CLI. |
 | `src/adapters/index.ts` | 60 | Maps `metaData` and facility-book bundles onto the expected fields. Field names only, no hashing or encoding. It ignores `metaData.digest`. |
 | `src/rpc/nonce.ts` | 39 | The optional nonce check: `fetch` JSON-RPC, three read-only calls. |
 | `src/web/main.ts`, `page.html`, `style.css` | 174, 112, 62 | The page. Plain DOM. Every value is written with `textContent`. |
-| `src/cli/main.ts`, `initcode.ts` | 135, 87 | The CLI, and the init-code and forge-artifact checks. |
+| `src/cli/main.ts`, `initcode.ts` | 148, 87 | The CLI, and the init-code and forge-artifact checks. |
 | `scripts/build.mjs` | 60 | The deterministic build. |
 
 ## 2. The checklist
@@ -32,7 +49,7 @@ Tick each one yourself. Don't take the tests' word for it.
 
 - [ ] **No network by default.** The only `fetch` is in `src/rpc/nonce.ts`. It runs only from the "Check the nonce" button or the CLI's `--rpc`. The page's CSP is `default-src 'none'`, and `connect-src` allows only `https:`, `http://localhost:*` and `http://127.0.0.1:*`. A typed URL is needed because the approver chooses it.
 - [ ] **No storage and nothing external.** No cookies, `localStorage`, analytics, fonts, CDNs or external scripts. The CSP allows the one inline script and the one inline style by sha256 only, with `base-uri 'none'`, `form-action 'none'` and `img-src 'none'`.
-- [ ] **No Braided Rivers code or data.** Nothing is imported, copied or vendored from any Braided Rivers repo. The braided-rivers and facility-book checkouts were read for field names and facts only. `test/fixtures/` holds made-up values in the bundle and `metaData` formats. No bundle data, init code or real key address is in the repo. The only real values are the BRA-687 pins for deployer-1 and D1–D3 (addresses and hashes), which the tests check.
+- [ ] **No Braided Rivers code or data.** Nothing is imported, copied or vendored from any Braided Rivers repo. The braided-rivers and facility-book checkouts were read for field names and facts only. `test/fixtures/` holds made-up values in the bundle and `metaData` formats. No bundle data or init code is in the repo. The only real values are the BRA-687 pins, which the tests check: deployer-1's address (`test/helpers.ts`), and the D1–D3 init-code hashes and CREATE addresses. No other real key address is in the repo.
 - [ ] **One runtime dependency.** `viem` only, pinned exactly. No hand-written RLP, ABI or hashing code.
 - [ ] **Fail closed.** Anything unparsed or unsupported gives CANNOT VERIFY, and so does invalid input in the expected fields or an internal error (`compare.ts` catches everything). A 32-byte payload gives BARE HASH.
 - [ ] **The canonical check.** `parsePayload` requires `serializeTx(parsed) === payload`. That catches trailing bytes, leading zeros and any non-canonical RLP.
@@ -42,12 +59,13 @@ Tick each one yourself. Don't take the tests' word for it.
   - A missing field gives PARTIAL (listed). Nothing entered gives NOT COMPARED. Neither is ever MATCH.
   - `expectedAddress` without `from` is listed as not compared.
 - [ ] **Never trusts `metaData`'s digest.** The adapter drops it. The page and CLI say so.
-- [ ] **The sender.** `from` is labelled everywhere as "as entered, not part of the payload". The approver checks `signKeyName` in DETAILS.
+- [ ] **The sender.** `from` is labelled everywhere as "as entered, not part of the payload". The approver checks `signKeyName` in DETAILS. The CLI refuses a `--from` that differs from the `from` in the expected fields or bundle.
+- [ ] **Names are never verified.** Contract, function and argument names are shown as "as entered, not verified". Only the selector, the values and the bytes are compared. The record says where the expected fields came from.
 - [ ] **Chain ID 1.** It is labelled as the fork, with the warning that br-verify can't tell the fork from real mainnet.
 
 ## 3. Dependencies
 
-Node **24.22.1** (`.nvmrc`, `engines`). Every version is exact. Install with `npm ci --ignore-scripts` (`.npmrc` also sets `ignore-scripts=true`).
+Node **24.22.1** (`.nvmrc`, `engines`, and `engine-strict=true` in `.npmrc`). Every version is exact. Install with `npm ci --ignore-scripts` (`.npmrc` also sets `ignore-scripts=true`).
 
 **Runtime** (`npm ls --omit=dev --all`): `viem@2.57.17`, published on 8 Nov 2026 and the latest 2.x on 10 Nov.
 
@@ -91,7 +109,7 @@ The build has no source maps, timestamps or absolute paths. The version comes fr
 
 ## 5. Tests
 
-`npm test` runs 124 tests offline in about 5 seconds. `npm run coverage` reports **98.8% line coverage** of `src/` (97.4% of statements, 92.2% of branches), and fails below 90%.
+`npm test` runs 127 tests offline in about 5 seconds. `npm run coverage` reports **98.8% line coverage** of `src/` (97.5% of statements, 92.5% of branches), and fails below 90%.
 
 | File | What it covers |
 |---|---|

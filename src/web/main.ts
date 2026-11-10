@@ -3,7 +3,7 @@ import { readExpected, type Notes } from '../adapters/index.js';
 import type { Expected } from '../core/compare.js';
 import { readPayloadText, type Reading } from '../core/payload.js';
 import { checkNonce } from '../rpc/nonce.js';
-import { COMMIT, decodedRows, FOOTER, grp, parseJsonText, record, verdictText, verify, VERSION, type Report } from '../view/report.js';
+import { COMMIT, decodedRows, FOOTER, grp, parseJsonText, record, verdictText, verify, VERSION, visible, type Report } from '../view/report.js';
 
 const FIELDS = ['chainId', 'nonce', 'value', 'gas', 'maxFeePerGas', 'maxPriorityFeePerGas', 'dataHash', 'from', 'expectedAddress'] as const;
 const NUMERIC = new Set(['chainId', 'nonce', 'value', 'gas', 'maxFeePerGas', 'maxPriorityFeePerGas']);
@@ -142,7 +142,7 @@ export function mount(doc: Document, win: { navigator: Navigator; setTimeout: ty
       $('json-status').textContent = `Read as ${r.format}.${r.format === 'metaData' ? ' Its "digest" is ignored: only the payload counts.' : ''} Check the form against the ticket.`;
       run();
     } catch (e) {
-      $('json-status').textContent = `Not used: ${e instanceof Error ? e.message : String(e)}`;
+      $('json-status').textContent = visible(`Not used: ${e instanceof Error ? e.message : String(e)}`);
     }
   });
   $('copy').addEventListener('click', async () => {
@@ -163,7 +163,7 @@ export function mount(doc: Document, win: { navigator: Navigator; setTimeout: ty
     if (!last?.parsed.ok) { out.textContent = 'Paste a payload that decodes first.'; return; }
     out.textContent = 'Checking…';
     const r = await checkNonce($('rpc').value, $('f-from').value, last.parsed.tx.chainId, last.parsed.tx.nonce);
-    out.textContent = `Nonce check (separate from the verdict): ${r.text}`;
+    out.textContent = visible(`Nonce check (separate from the verdict): ${r.text}`);
   });
   run();
 }

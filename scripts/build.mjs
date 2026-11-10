@@ -46,7 +46,7 @@ const html = page.replace('__CSP__', () => csp).replace('__STYLE__', () => style
 
 // The CLI.
 const cli = await build({
-  ...common, entryPoints: ['src/cli/main.ts'], format: 'esm', platform: 'node', target: 'node20', minify: false,
+  ...common, entryPoints: ['src/cli/main.ts'], format: 'esm', platform: 'node', target: 'node24', minify: false,
   banner: { js: '#!/usr/bin/env node' },
 });
 const mjs = cli.outputFiles[0].text;

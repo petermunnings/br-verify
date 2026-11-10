@@ -47,8 +47,8 @@ describe('the web page', () => {
     const ms = performance.now() - t0;
     expect($('count').textContent).toBe('45,485 bytes (read as base64)');
     // The access list defaults to empty, so a bare paste compares that one field.
-    expect(verdict()).toBe('PARTIAL: the fields you entered match');
-    expect($('verdict').textContent).toMatch(/Not compared: chain ID, nonce, max priority fee, max fee, gas limit, to, value, data\./);
+    expect(verdict()).toBe('PARTIAL: only the access list was compared');
+    expect($('verdict').textContent).toMatch(/Compared: access list\.Not compared: chain ID, nonce, max priority fee, max fee, gas limit, to, value, data\./);
     expect(ms).toBeLessThan(1000);
     expect(document.body.innerHTML).not.toContain(D3.data.slice(200, 400));
     const dd = [...document.querySelectorAll('#decoded dt')].map((x) => x.textContent);
@@ -95,7 +95,7 @@ describe('the web page', () => {
     expect(verdict()).toMatch(/CANNOT VERIFY|MISMATCH/);
     $('clear-form').click();
     vi.runAllTimers();
-    expect(verdict()).toBe('PARTIAL: the fields you entered match');
+    expect(verdict()).toBe('PARTIAL: only the access list was compared');
     expect($<HTMLSelectElement>('f-accessList').value).toBe('empty');
     $<HTMLSelectElement>('f-accessList').value = '';
     $('f-accessList').dispatchEvent(new Event('change', { bubbles: true }));

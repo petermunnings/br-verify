@@ -6,7 +6,7 @@ import { parseArgs } from 'node:util';
 import { readExpected, type Read } from '../adapters/index.js';
 import { readPayloadText, type Encoding, type Reading } from '../core/payload.js';
 import { checkNonce } from '../rpc/nonce.js';
-import { COMMIT, decodedRows, FOOTER, grp, parseJsonText, record, verdictText, verify, VERSION, type Report } from '../view/report.js';
+import { COMMIT, decodedRows, FOOTER, grp, parseJsonText, record, verdictText, verify, VERSION, visible, type Report } from '../view/report.js';
 import { initcode, type InitcodeResult } from './initcode.js';
 
 const USAGE = `br-verify ${VERSION} (commit ${COMMIT})
@@ -71,6 +71,15 @@ function printInit(io: Io, r: InitcodeResult, opts: { json?: boolean; record?: b
   return exitFor(r.verdict);
 }
 
+/** The approver's value and a file's value must agree when both are given. Never chooses between them. */
+function agree<T extends string | number>(flag: string, mine: T | undefined, theirs: T | undefined, what: string): T | undefined {
+  if (mine === undefined) return theirs;
+  if (theirs !== undefined && String(theirs).toLowerCase() !== String(mine).trim().toLowerCase()) {
+    throw new Error(`${flag} ${mine} differs from ${what} (${theirs}). br-verify won't choose between them`);
+  }
+  return mine;
+}
+
 export async function main(argv: string[], io: Io = defaultIo): Promise<number> {
   let parsed;
   try {
@@ -90,7 +99,8 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
       if (!path) throw new Error(cmd === 'decode' ? 'decode needs a file, or - for stdin' : 'compare needs --payload');
       if (cmd === 'compare' && !o.expected) throw new Error('compare needs --expected');
       const read: Read = o.expected ? readExpected(parseJsonText(o.expected.trim().startsWith('{') ? o.expected : io.readFile(o.expected))) : { format: 'expected', expected: {}, notes: {} };
-      if (o.from) read.expected.from ??= o.from;
+      // The approver's --from never silently loses to, or overrides, a different "from" in the expected fields.
+      if (o.from) read.expected.from = agree('--from', o.from, read.expected.from, '"from" in the expected fields');
       const reading = pick(readPayloadText(io.readFile(path)), o.encoding);
       if (typeof reading === 'string') {
         const t = `CANNOT VERIFY: br-verify can't verify this payload (${reading}). Reject unless the ticket explains why.`;
@@ -100,7 +110,7 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
       if (read.format !== 'expected' && !o.json && !o.record) io.err(`Expected fields read as ${read.format}.${read.format === 'metaData' ? ' Its digest is ignored: only the payload counts.' : ''}`);
       const rep = verify(reading, read.expected, read.notes);
       let nonce: string | undefined;
-      if (o.rpc && rep.parsed.ok) nonce = (await checkNonce(o.rpc, read.expected.from ?? '', rep.parsed.tx.chainId, rep.parsed.tx.nonce, io.fetch as never)).text;
+      if (o.rpc && rep.parsed.ok) nonce = visible((await checkNonce(o.rpc, read.expected.from ?? '', rep.parsed.tx.chainId, rep.parsed.tx.nonce, io.fetch as never)).text);
       return printReport(io, rep, o, nonce);
     }
     if (cmd === 'initcode') {
@@ -110,7 +120,10 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
         const b = JSON.parse(io.readFile(o.bundle)) as Record<string, unknown>;
         const r = readExpected(b);
         if (r.format !== 'bundle' || r.expected.to !== null) throw new Error('--bundle needs a contract-creation bundle');
-        data = r.expected.data; from ??= r.expected.from; nonce ??= r.expected.nonce === undefined ? undefined : Number(r.expected.nonce);
+        data = r.expected.data;
+        from = agree('--from', from, r.expected.from, 'the bundle\'s "from"');
+        const bundleNonce = r.expected.nonce === undefined ? undefined : Number(r.expected.nonce);
+        nonce = agree('--nonce', nonce, bundleNonce, 'the bundle\'s "expectedNonce"');
         bundle = { initCodeHash: r.expected.dataHash, expectedAddress: r.expected.expectedAddress, payloadBytes: b.payloadBytes as number | undefined, creationCodeHash: r.notes.artifact?.creationCodeHash };
       } else if (o.data) {
         const rd = pick(readPayloadText(io.readFile(o.data)), o.encoding);
@@ -124,7 +137,7 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     }
     throw new Error(`unknown command ${cmd}`);
   } catch (e) {
-    io.err(`CANNOT VERIFY: ${e instanceof Error ? e.message : String(e)}`);
+    io.err(visible(`CANNOT VERIFY: ${e instanceof Error ? e.message : String(e)}`));
     return 2;
   }
 }

@@ -36,9 +36,9 @@ The page is one file, `dist/br-verify.html`, with everything inline. It works ho
    - the **function signature and arguments** (calls), for example `mint(address,uint256)` and `["0x…", "7000000000000000000000"]`;
    - the **data** as hex.
 
-   Or open **Paste expected JSON** and paste the expected fields, the request's `metaData` (JSON or base64), or a facility-book bundle. Then check the form against the ticket.
+   Or open **Paste expected JSON** and paste the expected fields, the request's `metaData` (JSON or base64), or a facility-book bundle. Then check the form against the ticket. The requester's machine wrote `metaData`, so its function and argument names are shown as "name as entered, not verified". Only the selector, the values and the bytes are compared.
 5. Read the verdict. Then read the decoded view and any warnings.
-6. Press **Copy result** and paste the text block into the Linear ticket.
+6. Press **Copy result** and paste the text block into the Linear ticket. It says where the expected fields came from (typed in, `metaData`, a bundle or JSON), and reminds you to check `signKeyName`.
 
 ## On a laptop (the CLI)
 
@@ -54,6 +54,7 @@ node dist/br-verify.mjs initcode --bundle 01-D1.json --expect-hash 0x… --expec
 - `--json` gives machine-readable output. `--record` prints the text block for the ticket.
 - `--expected` takes a file or inline JSON: the expected fields, a `metaData` object, or a facility-book bundle.
 - `--artifact` takes a forge artifact. br-verify checks that `data` starts with its creation code, decodes the constructor arguments by name, and requires them to re-encode to the same bytes. A `bytes` argument longer than 64 bytes is shown as its length and keccak256.
+- `--from` must agree with any `from` in `--expected` or `--bundle`, and `--nonce` with a bundle's `expectedNonce`. If they differ, br-verify refuses (exit 2). It never chooses between them.
 - `--rpc <url>` runs the optional nonce check. It is the only way the CLI touches the network.
 - Exit codes: **0** for MATCH only; **1** for MISMATCH; **2** for everything else.
 
@@ -107,7 +108,9 @@ The verdict word is always shown as text, never by colour alone.
 
 **Warnings** don't change the verdict. They appear when the value isn't 0, the access list isn't empty, the gas limit is 16,777,216 or more, the init code is longer than 49,152 bytes, the chain is unknown, or `to` is the zero address.
 
-Because the access list defaults to empty, a payload pasted with nothing else entered gives PARTIAL (the access list was compared), not NOT COMPARED.
+Because the access list defaults to empty, a payload pasted with nothing else entered gives "PARTIAL: only the access list was compared", not NOT COMPARED. Every PARTIAL lists what was compared and what wasn't.
+
+Invisible and direction-changing characters (zero-width spaces, right-to-left marks and the like) are shown as `[U+XXXX]`, so a name or value can't look like something it isn't.
 
 **The nonce check** is optional and separate. It never changes MATCH or MISMATCH. For chain ID 1, the fork isn't reachable from a phone: compare the nonce with the pre-flight posted on the ticket.
 
