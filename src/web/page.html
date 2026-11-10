@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>br-verify</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<header>
+  <h1><svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm-1.2 14.2-3.5-3.5 1.4-1.4 2.1 2.1 4.9-4.9 1.4 1.4-6.3 6.3Z" fill="currentColor"/></svg> br-verify</h1>
+  <p class="meta">Version <span id="version"></span> · commit <span id="commit"></span></p>
+  <p class="meta">Holds no keys. Sends nothing. Works offline.</p>
+</header>
+
+<main>
+  <section aria-labelledby="h-payload">
+    <h2 id="h-payload">1. Payload from DETAILS</h2>
+    <p class="hint">In the Authorization App, open the request, go to DETAILS, copy the whole <b>payload</b>, and paste it here.</p>
+    <textarea id="payload" rows="5" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="count" placeholder="Paste the payload here"></textarea>
+    <div class="row">
+      <button type="button" id="paste">Paste</button>
+      <button type="button" id="clear-payload" class="secondary">Clear</button>
+    </div>
+    <p id="count" class="count" aria-live="polite">Nothing pasted yet.</p>
+    <fieldset id="choose" hidden>
+      <legend>This text reads two ways. Which encoding does DETAILS use?</legend>
+      <div id="choose-options"></div>
+    </fieldset>
+  </section>
+
+  <section aria-labelledby="h-expect">
+    <h2 id="h-expect">2. What you expect</h2>
+    <p class="hint">From the Linear ticket. Leave a box empty if you don't have the value: it is then listed as "not compared".</p>
+    <details id="json-box">
+      <summary>Paste expected JSON (expected fields, <code>metaData</code> or a bundle)</summary>
+      <textarea id="json" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder='{"chainId": 1, "nonce": 0, …}'></textarea>
+      <div class="row">
+        <button type="button" id="json-use">Fill the form from this</button>
+      </div>
+      <p id="json-status" class="hint" aria-live="polite"></p>
+    </details>
+    <form id="expect" autocomplete="off" novalidate>
+      <label>Chain ID <input id="f-chainId" inputmode="numeric"></label>
+      <label>Nonce <input id="f-nonce" inputmode="numeric"></label>
+      <fieldset>
+        <legend>To</legend>
+        <label class="inline"><input type="radio" name="kind" value="" checked> Not entered</label>
+        <label class="inline"><input type="radio" name="kind" value="create"> Contract creation</label>
+        <label class="inline"><input type="radio" name="kind" value="call"> Address</label>
+        <input id="f-to" placeholder="0x…" spellcheck="false" autocapitalize="off" aria-label="To address">
+        <input id="f-toName" placeholder="Contract name (optional, shown as entered)" aria-label="Contract name">
+      </fieldset>
+      <label>Value (wei) <input id="f-value" inputmode="numeric"></label>
+      <label>Gas limit <input id="f-gas" inputmode="numeric"></label>
+      <label>Max fee per gas (wei) <input id="f-maxFeePerGas" inputmode="numeric"></label>
+      <label>Max priority fee per gas (wei) <input id="f-maxPriorityFeePerGas" inputmode="numeric"></label>
+      <label>Access list
+        <select id="f-accessList">
+          <option value="empty" selected>Empty (default)</option>
+          <option value="">Not entered</option>
+        </select>
+      </label>
+      <p class="hint">Default: empty. The signing flow never sets an access list, so a payload with one gives MISMATCH.</p>
+      <fieldset>
+        <legend>Data</legend>
+        <label>Init-code hash, keccak256(data) <input id="f-dataHash" placeholder="0x…" spellcheck="false" autocapitalize="off"></label>
+        <label>Function signature <input id="f-signature" placeholder="mint(address,uint256)" spellcheck="false" autocapitalize="off"></label>
+        <label>Arguments (a JSON list, or one per line) <textarea id="f-args" rows="3" spellcheck="false" autocapitalize="off" placeholder='["0x…", "7000000000000000000000"]'></textarea></label>
+        <label>Data, as hex <textarea id="f-data" rows="2" spellcheck="false" autocapitalize="off" placeholder="0x…"></textarea></label>
+      </fieldset>
+      <fieldset>
+        <legend>Not part of the payload</legend>
+        <label>From (the sending key's address) <input id="f-from" placeholder="0x…" spellcheck="false" autocapitalize="off"></label>
+        <p class="hint">As entered, not part of the payload: check that the key named in DETAILS (<code>signKeyName</code>) has this address.</p>
+        <label>Expected contract address (creations) <input id="f-expectedAddress" placeholder="0x…" spellcheck="false" autocapitalize="off"></label>
+      </fieldset>
+      <div class="row"><button type="button" id="clear-form" class="secondary">Clear the form</button></div>
+    </form>
+  </section>
+
+  <section aria-labelledby="h-result">
+    <h2 id="h-result">3. Result</h2>
+    <div id="verdict" class="verdict grey" role="status" aria-live="polite">
+      <p class="headline">Waiting for a payload</p>
+    </div>
+    <div id="warnings"></div>
+    <dl id="decoded"></dl>
+    <div class="row"><button type="button" id="copy" disabled>Copy result</button></div>
+    <p id="copy-status" class="hint" aria-live="polite"></p>
+    <pre id="record" hidden></pre>
+  </section>
+
+  <section aria-labelledby="h-nonce">
+    <h2 id="h-nonce">4. Nonce on chain (optional)</h2>
+    <p id="nonce-chain1" class="hint">For chain ID 1: the fork isn't reachable from a phone. Compare the nonce with the pre-flight posted on the ticket.</p>
+    <p class="hint">br-verify sends nothing unless you type an RPC URL and press the button. It then sends three read-only requests to that URL.</p>
+    <label>RPC URL <input id="rpc" type="url" placeholder="https://…" spellcheck="false" autocapitalize="off"></label>
+    <div class="row"><button type="button" id="nonce-check" class="secondary">Check the nonce</button></div>
+    <p id="nonce-result" aria-live="polite"></p>
+  </section>
+</main>
+
+<footer>
+  <p id="footer"></p>
+</footer>
+<script>__SCRIPT__</script>
+</body>
+</html>

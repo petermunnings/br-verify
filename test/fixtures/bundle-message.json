@@ -1,0 +1,10 @@
+{
+  "name": "claim-signature",
+  "kind": "message",
+  "signer": "0x4000000000000000000000000000000000000004",
+  "keyPolicyRule": "test-signer: Use none",
+  "standard": "EIP-191 personal_sign over the 32-byte digest",
+  "message": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "prefixedHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+  "_end": null
+}
